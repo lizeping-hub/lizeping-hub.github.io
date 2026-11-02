@@ -26,29 +26,20 @@ function createCollection(key) {
   const host = document.querySelector(`[data-collection="${key}"]`);
   const items = content[key];
   if (!host || !items?.length) return;
+  const label = { projects: '个人项目', resources: '工具与技能', writing: '文章' }[key];
   const wrapper = element('div', 'carousel');
   wrapper.setAttribute('role', 'region');
   wrapper.setAttribute('aria-roledescription', '轮播');
-  const label = { projects: '个人项目', resources: '工具与技能', writing: '文章' }[key];
   wrapper.setAttribute('aria-label', label);
   const toolbar = element('div', 'carousel-toolbar');
-  toolbar.append(element('span', '', { projects: 'PROJECT INDEX', resources: 'RESOURCE INDEX', writing: 'ARTICLE ARCHIVE' }[key]));
-  const controls = element('div', 'carousel-buttons');
-  const prev = element('button', '', '‹');
-  const next = element('button', '', '›');
-  prev.type = next.type = 'button';
-  prev.setAttribute('aria-label', `上一个${label}`);
-  next.setAttribute('aria-label', `下一个${label}`);
-  prev.setAttribute('aria-controls', `track-${key}`);
-  next.setAttribute('aria-controls', `track-${key}`);
-  controls.append(prev, next);
-  toolbar.append(controls);
+  toolbar.append(element('span', '', { projects: 'PROJECT INDEX', resources: 'RESOURCE INDEX', writing: 'ARTICLE ARCHIVE' }[key]), element('span', '', '3D GALLERY / 立体浏览'));
+  const stage = element('div', 'carousel-stage');
   const track = element('div', 'carousel-track');
   track.id = `track-${key}`;
   track.setAttribute('role', 'list');
-  track.setAttribute('aria-label', `${label}卡片，可使用左右方向键切换`);
+  track.setAttribute('aria-label', `${label}立体卡片，可用方向键或左右滑动切换`);
   track.tabIndex = 0;
-  items.forEach((item, index) => {
+  const cards = items.map((item, index) => {
     const card = element('article', 'portfolio-card');
     card.setAttribute('role', 'listitem');
     card.setAttribute('aria-label', `${index + 1} / ${items.length}：${item.title}`);
@@ -57,6 +48,7 @@ function createCollection(key) {
     image.alt = item.alt;
     image.width = 960;
     image.height = 540;
+    image.draggable = false;
     image.decoding = 'async';
     const body = element('div', 'card-body');
     const meta = element('div', 'card-meta');
@@ -74,63 +66,120 @@ function createCollection(key) {
     body.append(links);
     card.append(image, body);
     track.append(card);
+    return card;
   });
+  const controls = element('div', 'carousel-buttons');
+  const prev = element('button', 'carousel-prev', '‹');
+  const next = element('button', 'carousel-next', '›');
+  prev.type = next.type = 'button';
+  prev.setAttribute('aria-label', `上一张${label}卡片`);
+  next.setAttribute('aria-label', `下一张${label}卡片`);
+  [prev, next].forEach(button => button.setAttribute('aria-controls', track.id));
+  controls.append(prev, next);
+  stage.append(track, controls);
   const foot = element('div', 'carousel-foot');
-  foot.append(element('span', '', '← → 键切换 / 横向滑动浏览'));
+  foot.append(element('span', '', '← → 键切换 / 拖动与滑动浏览'));
   const progress = element('span', 'carousel-progress');
   progress.setAttribute('aria-hidden', 'true');
   items.forEach(() => progress.append(element('i')));
-  const counter = element('span', 'carousel-counter', `01 / ${number(items.length)}`);
+  const counter = element('span', 'carousel-counter');
   counter.setAttribute('role', 'status');
   counter.setAttribute('aria-live', 'polite');
   counter.setAttribute('aria-atomic', 'true');
   foot.append(progress, counter);
-  wrapper.append(toolbar, track, foot);
+  wrapper.append(toolbar, stage, foot);
   host.append(wrapper);
-  let index = 0;
-  let ticking = false;
+  let current = 0;
+  let suppressClick = false;
   function update() {
-    const cards = Array.from(track.children);
-    const origin = track.getBoundingClientRect().left;
-    let nearest = 0;
-    let distance = Infinity;
-    cards.forEach((card, i) => {
-      const delta = Math.abs(card.getBoundingClientRect().left - origin);
-      if (delta < distance) { distance = delta; nearest = i; }
+    const width = stage.clientWidth;
+    if (width) track.style.setProperty('--card-shift', `${Math.min(width * .285, 290)}px`);
+    cards.forEach((card, index) => {
+      let offset = (index - current + items.length) % items.length;
+      if (offset > items.length / 2) offset -= items.length;
+      const active = offset === 0;
+      card.dataset.offset = Math.abs(offset) <= 1 ? String(offset) : 'far';
+      card.dataset.active = String(active);
+      card.tabIndex = active ? 0 : -1;
+      card.setAttribute('aria-hidden', String(!active));
+      card.querySelectorAll('a').forEach(link => { link.tabIndex = active ? 0 : -1; });
     });
-    // The last card can be clamped by the end of a native scroll area.
-    if (track.scrollLeft > 1 && track.scrollWidth - track.clientWidth - track.scrollLeft < 3) nearest = cards.length - 1;
-    index = nearest;
-    counter.textContent = `${number(index + 1)} / ${number(items.length)}`;
-    prev.disabled = index === 0;
-    next.disabled = index === items.length - 1;
-    cards.forEach((card, i) => { card.dataset.active = String(i === index); });
-    Array.from(progress.children).forEach((bar, i) => bar.classList.toggle('active', i === index));
+    counter.textContent = `${number(current + 1)} / ${number(items.length)}`;
+    Array.from(progress.children).forEach((bar, i) => bar.classList.toggle('active', i === current));
+    prev.disabled = next.disabled = items.length < 2;
   }
-  function move(target) {
-    const bounded = Math.max(0, Math.min(items.length - 1, target));
-    const card = track.children[bounded];
-    const delta = card.getBoundingClientRect().left - track.getBoundingClientRect().left;
-    track.scrollTo({ left: track.scrollLeft + delta, behavior: reducedMotion.matches ? 'instant' : 'smooth' });
+  function goTo(index) {
+    const focusedInCard = cards.some(card => card.contains(document.activeElement));
+    current = (index + items.length) % items.length;
+    update();
+    if (focusedInCard) cards[current].focus({ preventScroll: true });
   }
-  prev.addEventListener('click', () => move(index - 1));
-  next.addEventListener('click', () => move(index + 1));
+  prev.addEventListener('click', () => goTo(current - 1));
+  next.addEventListener('click', () => goTo(current + 1));
+  cards.forEach((card, index) => card.addEventListener('click', event => {
+    if (index !== current) { event.preventDefault(); goTo(index); }
+  }));
   track.addEventListener('keydown', event => {
-    if (event.key === 'ArrowRight') { event.preventDefault(); move(index + 1); }
-    if (event.key === 'ArrowLeft') { event.preventDefault(); move(index - 1); }
-    if (event.key === 'Home') { event.preventDefault(); move(0); }
-    if (event.key === 'End') { event.preventDefault(); move(items.length - 1); }
+    const actions = { ArrowRight: () => goTo(current + 1), ArrowLeft: () => goTo(current - 1), Home: () => goTo(0), End: () => goTo(items.length - 1) };
+    if (actions[event.key]) { event.preventDefault(); actions[event.key](); }
   });
-  track.addEventListener('scroll', () => {
-    if (ticking) return;
-    ticking = true;
-    requestAnimationFrame(() => { update(); ticking = false; });
-  }, { passive: true });
+  let drag = null;
+  stage.addEventListener('pointerdown', event => {
+    if (!event.isPrimary || event.button !== 0) return;
+    suppressClick = false;
+    if (event.target.closest('button')) return;
+    drag = { x: event.clientX, y: event.clientY, id: event.pointerId };
+  });
+  stage.addEventListener('pointermove', event => {
+    if (!drag || drag.id !== event.pointerId) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy)) {
+      stage.classList.add('is-dragging');
+      if (!stage.hasPointerCapture(event.pointerId)) stage.setPointerCapture(event.pointerId);
+    }
+  });
+  const finishDrag = event => {
+    if (!drag || drag.id !== event.pointerId) return;
+    const dx = event.clientX - drag.x;
+    const dy = event.clientY - drag.y;
+    if (event.type !== 'pointercancel' && Math.abs(dx) > 42 && Math.abs(dx) > Math.abs(dy)) {
+      suppressClick = true;
+      goTo(current + (dx < 0 ? 1 : -1));
+      setTimeout(() => { suppressClick = false; }, 180);
+    }
+    if (stage.hasPointerCapture(event.pointerId)) stage.releasePointerCapture(event.pointerId);
+    drag = null;
+    stage.classList.remove('is-dragging');
+  };
+  stage.addEventListener('pointerup', finishDrag);
+  stage.addEventListener('pointercancel', finishDrag);
+  stage.addEventListener('lostpointercapture', event => {
+    // Touch begins with implicit capture on the image. Its transfer to the
+    // stage also bubbles a lost-capture event; only end the stage's capture.
+    if (event.target !== stage) return;
+    drag = null;
+    stage.classList.remove('is-dragging');
+  });
+  stage.addEventListener('click', event => {
+    if (suppressClick) { event.preventDefault(); event.stopPropagation(); suppressClick = false; }
+  }, true);
+  let wheelTotal = 0;
+  let lastWheel = 0;
+  stage.addEventListener('wheel', event => {
+    if (Math.abs(event.deltaX) <= Math.abs(event.deltaY)) return;
+    event.preventDefault();
+    const now = performance.now();
+    if (now - lastWheel > 180) wheelTotal = 0;
+    wheelTotal += event.deltaX;
+    if (Math.abs(wheelTotal) > 38 && now - lastWheel > 450) {
+      goTo(current + (wheelTotal > 0 ? 1 : -1));
+      wheelTotal = 0;
+      lastWheel = now;
+    }
+  }, { passive: false });
   carousels.set(key, { update, track });
-  prev.disabled = true;
-  next.disabled = items.length < 2;
-  track.firstElementChild.dataset.active = 'true';
-  progress.firstElementChild.classList.add('active');
+  update();
 }
 ['projects', 'resources', 'writing'].forEach(createCollection);
 
@@ -178,13 +227,13 @@ window.addEventListener('resize', () => {
   });
 });
 
-document.getElementById('copy-github').addEventListener('click', async () => {
+document.getElementById('copy-email').addEventListener('click', async () => {
   const status = document.getElementById('copy-status');
   try {
-    await navigator.clipboard.writeText('https://github.com/lizeping-hub');
-    status.textContent = '已复制 GitHub 地址。';
+    await navigator.clipboard.writeText('lizeping2021@163.com');
+    status.textContent = '已复制邮箱地址。';
   } catch {
-    status.textContent = '未能复制，请使用上方 GitHub 链接：https://github.com/lizeping-hub';
+    status.textContent = '未能复制，邮箱地址为：lizeping2021@163.com';
   }
 });
 document.getElementById('year').textContent = new Date().getFullYear();
