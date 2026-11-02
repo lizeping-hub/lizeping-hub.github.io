@@ -10,6 +10,9 @@
 - `style.css`：视觉样式与移动端适配。
 - `main.js`：导航状态交互。
 - `.nojekyll`：让 GitHub Pages 直接发布静态文件。
+- `assets/golden-coast.jpg`：AI 生成的海岸氛围摄影；来源与提示词见 [素材说明](assets/README.md)。
+
+界面采用暖纸色画布、酒红主按钮、淡紫选中态与摄影叠层。产品视角支持选项卡和键盘切换，手机端使用可展开的导航。
 
 项目案例和联系方式目前标为待补充，可直接编辑 `index.html`。
 
@@ -28,7 +31,7 @@ python3 -m http.server 4173
 GitHub Pages 使用 `main` 分支的根目录发布。在修改后执行：
 
 ```sh
-git add index.html style.css main.js
+git add index.html style.css main.js assets
 git commit -m "Update personal website"
 git push origin main
 ```
